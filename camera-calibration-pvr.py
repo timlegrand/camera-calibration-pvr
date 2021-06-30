@@ -28,9 +28,9 @@ from math import sqrt, pi, atan2, degrees
 bl_info = {
     "name": "Camera Calibration using Perspective Views of Rectangles",
     "author": "Marco Rossini",
-    "version": (0, 4, 0),
+    "version": (0, 5, 0),
     # "warning": "This is an unreleased development version.",
-    "blender": (2, 7, 0),
+    "blender": (2, 92, 0),
     "location": "3D View > Tools Panel > Tools (Or custom panel category) ",
     "description": "Calibrates position, rotation and focal length of a camera using a single image of a rectangle.",
     "wiki_url": "https://github.com/mrossini-ethz/camera-calibration-pvr",
@@ -491,7 +491,7 @@ def calibrate_camera_FXY_PR_VV(vertices, attached_vertices, dangling_vertices, s
 
 # Get the background images
 def get_background_image_data(context):
-    bkg_images = context.space_data.background_images
+    bkg_images = context.scene.camera.data.background_images   # TODO: is that the correct way?
     if len(bkg_images) == 1:
         # If there is only one background image, take that one
         img = bkg_images[0]
@@ -512,10 +512,10 @@ def get_background_image_data(context):
                 return None
         # Get the background image properties
         img = bkg_images_top[0]
-    offx = img.offset_x
-    offy = img.offset_y
+    offx = img.offset[0]
+    offy = img.offset[1]
     rot = img.rotation
-    scale = img.size
+    scale = img.scale
     flipx = img.use_flip_x
     flipy = img.use_flip_y
     w, h = img.image.size
@@ -624,13 +624,13 @@ def get_vertical_mode_matrix(is_vertical, camera_rotation):
 def update_scene(camera, cam_pos, cam_rot, is_vertical, scene, img_width, img_height, object_name, coords, size_factor):
     """Updates the scene by moving the camera and creating a new rectangle"""
     # Get the 3D cursor location
-    cursor_pos = bpy.context.space_data.cursor_location
+    cursor_pos = bpy.context.scene.cursor.location
     # Get transformation matrix for vertical orientation
     vert_matrix = get_vertical_mode_matrix(is_vertical, cam_rot)
     # Set the camera position and rotation
     cam_rot = cam_rot.copy()
     cam_rot.rotate(vert_matrix)
-    set_camera_transformation(camera, vert_matrix * cam_pos * size_factor + cursor_pos, cam_rot)
+    set_camera_transformation(camera, vert_matrix @ cam_pos * size_factor + cursor_pos, cam_rot)
     # Apply the transformation matrix for vertical orientation
     for i in range(4):
         coords[i].rotate(vert_matrix)
@@ -649,7 +649,7 @@ def update_scene(camera, cam_pos, cam_rot, is_vertical, scene, img_width, img_he
 ### Operator F PR S ##############################################################
 
 class CameraCalibration_F_PR_S_Operator(bpy.types.Operator):
-    """Calibrates the focal length, position and rotation of the active camera."""
+    """Calibrates the focal length, position and rotation of the active camera"""
     bl_idname = "camera.camera_calibration_f_pr_s"
     bl_label = "Solve Focal"
     bl_options = {"REGISTER", "UNDO"}
@@ -710,13 +710,13 @@ class CameraCalibration_F_PR_S_Operator(bpy.types.Operator):
         update_scene(cam_obj, cam_pos, cam_rot, self.vertical_property, scene, w, h, obj.name, coords, size_factor)
         # Switch to the active camera
         if not bpy.context.space_data.region_3d.view_perspective == "CAMERA":
-            bpy.ops.view3d.viewnumpad(type="CAMERA")
+            bpy.ops.view3d.view_camera()
         return {'FINISHED'}
 
 ### Operator FX PR V #############################################################
 
 class CameraCalibration_FX_PR_V_Operator(bpy.types.Operator):
-    """Calibrates the focal length, vertical lens shift, position and rotation of the active camera."""
+    """Calibrates the focal length, vertical lens shift, position and rotation of the active camera"""
     bl_idname = "camera.camera_calibration_fx_pr_v"
     bl_label = "Solve Focal+Y"
     bl_options = {"REGISTER", "UNDO"}
@@ -795,13 +795,13 @@ class CameraCalibration_FX_PR_V_Operator(bpy.types.Operator):
         update_scene(cam_obj, cam_pos, cam_rot, self.vertical_property, scene, w, h, obj.name, coords, size_factor)
         # Switch to the active camera
         if not bpy.context.space_data.region_3d.view_perspective == "CAMERA":
-            bpy.ops.view3d.viewnumpad(type="CAMERA")
+            bpy.ops.view3d.view_camera()
         return {'FINISHED'}
 
 ### Operator FXY PR VV ############################################################
 
 class CameraCalibration_FXY_PR_VV_Operator(bpy.types.Operator):
-    """Calibrates the focal length, lens shift (horizontal and vertical), position and rotation of the active camera."""
+    """Calibrates the focal length, lens shift (horizontal and vertical), position and rotation of the active camera"""
     bl_idname = "camera.camera_calibration_fxy_pr_vv"
     bl_label = "Solve Focal+X+Y"
     bl_options = {"REGISTER", "UNDO"}
@@ -885,7 +885,7 @@ class CameraCalibration_FXY_PR_VV_Operator(bpy.types.Operator):
         update_scene(cam_obj, cam_pos, cam_rot, self.vertical_property, scene, w, h, obj.name, coords, size_factor)
         # Switch to the active camera
         if not bpy.context.space_data.region_3d.view_perspective == "CAMERA":
-            bpy.ops.view3d.viewnumpad(type="CAMERA")
+            bpy.ops.view3d.view_camera()
         return {'FINISHED'}
 
 ### Panel ########################################################################
@@ -896,7 +896,7 @@ class CameraCalibrationPanel(bpy.types.Panel):
     bl_idname = "VIEW_3D_camera_calibration"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'TOOLS'
-    bl_category = "Tools"
+    # bl_category = "Tools"  # TODO: remove?
 
     def draw(self, context):
         layout = self.layout
@@ -934,12 +934,23 @@ class LayerMAddonPreferences(bpy.types.AddonPreferences):
 
 ### Register #####################################################################
 
+classes = (
+    CameraCalibration_F_PR_S_Operator,
+    CameraCalibration_FX_PR_V_Operator,
+    CameraCalibration_FXY_PR_VV_Operator,
+    CameraCalibrationPanel,
+    LayerMAddonPreferences
+)
+
 def register():
-    bpy.utils.register_module(__name__)
-    update_panel(None, bpy.context)
+    from bpy.utils import register_class
+    for cls in classes:
+        register_class(cls)
 
 def unregister():
-    bpy.utils.unregister_module(__name__)
+    from bpy.utils import unregister_class
+    for cls in reversed(classes):
+        unregister_class(cls)
 
 if __name__ == "__main__":
     register()
